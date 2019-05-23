@@ -14,6 +14,8 @@ from mpl_toolkits.axes_grid1.anchored_artists import AnchoredEllipse
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from matplotlib.offsetbox import AnchoredText
 import matplotlib as mpl
+from astropy import units as u
+from astropy.coordinates import SkyCoord
 #plt.style.use('seaborn-dark')
 #plt.style.use('ggplot')
 #plt.style.use('seaborn-deep')
@@ -28,7 +30,7 @@ plt.rcParams['xtick.direction'] = 'in'  # directions of x ticks ('in'), ('out') 
 plt.rcParams['ytick.direction'] = 'in'  # directions of y ticks ('in'), ('out') or ('inout')
 #plt.rcParams['xtick.major.width'] = 1.0 # x ticks width
 #plt.rcParams['ytick.major.width'] = 1.0 # y ticks width
-plt.rcParams['font.size'] = 11           # fontsize
+#plt.rcParams['font.size'] = 11           # fontsize
 #plt.rcParams['axes.linewidth'] = 1.0    # edge linewidth
 
 
@@ -59,7 +61,8 @@ def Idistmap(fitsdata, outname=None, imscale=None, outformat='eps', color=True, 
              colorbar=False, cbaroptions=np.array(['right','5%','0%','Jy/beam']), vmin=None,vmax=None,
              contour=True, clevels=np.array([0.15, 0.3, 0.45, 0.6, 0.75, 0.9]), ccolor='k',
              xticks=np.empty, yticks=np.empty, relativecoords=True, csize=9, scalebar=np.empty(0),
-             cstar=True, prop_star=np.array(['1','0.5','white']), locsym=0.1, bcolor='k',figsize=(11.69,8.27)):
+             cstar=True, prop_star=np.array(['1','0.5','white']), locsym=0.1, bcolor='k',figsize=(11.69,8.27),
+             tickcolor='k',axiscolor='k',labelcolor='k'):
     '''
     Make a figure from single image.
 
@@ -102,10 +105,10 @@ def Idistmap(fitsdata, outname=None, imscale=None, outformat='eps', color=True, 
     # reading header info.
     xlabel   = header['CTYPE1']
     ylabel   = header['CTYPE2']
-    try:
-        restfreq = header['RESTFRQ'] # Hz
-    except:
-        restfreq = header['RESTFREQ'] # Hz
+    #try:
+        #restfreq = header['RESTFRQ'] # Hz
+    #except:
+        #restfreq = header['RESTFREQ'] # Hz
     refval_x = header['CRVAL1']*60.*60.
     refval_y = header['CRVAL2']*60.*60.
     refpix_x = int(header['CRPIX1'])
@@ -159,10 +162,11 @@ def Idistmap(fitsdata, outname=None, imscale=None, outformat='eps', color=True, 
         # color bar
         print 'plot color'
         if colorbar:
+            cbar_loc, cbar_wd, cbar_pad, cbar_lbl = cbaroptions
             divider = mpl_toolkits.axes_grid1.make_axes_locatable(ax)
-            cax     = divider.append_axes('right', '5%', pad='0%')
+            cax     = divider.append_axes(cbar_loc, cbar_wd, pad=cbar_pad)
             cbar    = fig.colorbar(imcolor, cax = cax)
-            cbar.set_label('Jy/beam')
+            cbar.set_label(cbar_lbl)
 
     if contour:
         imcont02 = ax.contour(data, colors=ccolor, origin='lower',extent=(xmin,xmax,ymin,ymax), levels=clevels,linewidths=1)
@@ -172,18 +176,19 @@ def Idistmap(fitsdata, outname=None, imscale=None, outformat='eps', color=True, 
     figxmin, figxmax, figymin, figymax = imscale
     ax.set_xlim(figxmax,figxmin)
     ax.set_ylim(figymin,figymax)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
+    ax.set_xlabel(xlabel,fontsize=csize)
+    ax.set_ylabel(ylabel, fontsize=csize)
     if xticks != np.empty and yticks != np.empty:
         ax.set_xticks(xticks)
         ax.set_yticks(yticks)
     else:
         pass
     ax.set_aspect(1)
-    ax.tick_params(which='both', direction='in',bottom=True, top=True, left=True, right=True)
+    ax.tick_params(which='both', direction='in',bottom=True, top=True, left=True, right=True, labelsize=csize, color=tickcolor, labelcolor=labelcolor, pad=9)
 
     # plot beam size
-    beam    = patches.Ellipse(xy=(figxmax-locsym*figxmax, figymin-locsym*figymin), width=bmin, height=bmaj, fc=bcolor, angle=-bpa)
+    bmin_plot, bmaj_plot = ax.transLimits.transform((0,bmaj)) - ax.transLimits.transform((bmin,0))   # data --> Axes coordinate
+    beam = patches.Ellipse(xy=(0.1, 0.1), width=bmin_plot, height=bmaj_plot, fc=bcolor, angle=bpa, transform=ax.transAxes)
     ax.add_patch(beam)
 
     # central star position
@@ -200,8 +205,8 @@ def Idistmap(fitsdata, outname=None, imscale=None, outformat='eps', color=True, 
     # scale bar
     if len(scalebar) == 0:
         pass
-    elif len(scalebar) == 7:
-        barx, bary, barlength, textx, texty, text, colors = scalebar
+    elif len(scalebar) == 8:
+        barx, bary, barlength, textx, texty, text, colors, barcsize = scalebar
 
         barx      = float(barx)
         bary      = float(bary)
@@ -209,11 +214,11 @@ def Idistmap(fitsdata, outname=None, imscale=None, outformat='eps', color=True, 
         textx     = float(textx)
         texty     = float(texty)
 
-        scale   = patches.Arc(xy=(barx,bary), width=barlength, height=0., lw=2, color=colors,zorder=10)
+        scale   = patches.Arc(xy=(barx,bary), width=barlength, height=0.001, lw=2, color=colors,zorder=10)
         ax.add_patch(scale)
-        ax.text(textx,texty,text,color=colors)
+        ax.text(textx,texty,text,color=colors,fontsize=barcsize,horizontalalignment='center',verticalalignment='center')
     else:
-        print 'scalebar must be 7 elements. Check scalebar.'
+        print 'scalebar must be 8 elements. Check scalebar.'
 
     fig.savefig(outname, transparent = True)
 
@@ -224,9 +229,10 @@ def Idistmap(fitsdata, outname=None, imscale=None, outformat='eps', color=True, 
 ### moment maps
 def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='Greys',
              colorbar=False, cbaroptions=np.array(['right','5%','0%','Jy/beam']), vmin=None, vmax=None,
-             clevels=np.array([0.15, 0.3, 0.45, 0.6, 0.75, 0.9]), ccolor='k',
+             clevels=np.array([0.15, 0.3, 0.45, 0.6, 0.75, 0.9]), ccolor='k',mask=None,
              xticks=np.empty, yticks=np.empty, relativecoords=True, csize=9, scalebar=np.empty(0),
-             cstar=True, prop_star=np.array(['1','0.5','white']), locsym=0.1, bcolor='k',logscale=False):
+             cstar=True, prop_star=np.array(['1','0.5','white']), locsym=0.1, bcolor='k',logscale=False,
+             coord_center=None,tickcolor='k',axiscolor='k',labelcolor='k',figsize=(11.69,8.27)):
     '''
     Make a figure from multi images.
 
@@ -243,6 +249,7 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
     contour (bool): If True, contour will be drawn.
     clevels (ndarray): Set contour levels. Abusolute value.
     ccolor: Set contour color.
+    mask(float): Mask fits02 where fits01 < mask.
     xticks, yticks: Optional setting. If input ndarray, set xticks and yticsk as well as input.
     relativecoords (bool): If True, the coordinate is shown in relativecoordinate. Default True.
     csize: Font size.
@@ -360,14 +367,16 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
     # reading header info.
     xlabel   = header['CTYPE1']
     ylabel   = header['CTYPE2']
-    try:
-        restfreq = header['RESTFRQ'] # Hz
-    except:
-        restfreq = header['RESTFREQ'] # Hz
-    refval_x = header['CRVAL1']*60.*60.
-    refval_y = header['CRVAL2']*60.*60.
+    #try:
+        #restfreq = header['RESTFRQ'] # Hz
+    #except:
+        #restfreq = header['RESTFREQ'] # Hz
+    refval_x = header['CRVAL1']
+    refval_y = header['CRVAL2']
     refpix_x = int(header['CRPIX1'])
     refpix_y = int(header['CRPIX2'])
+    del_x_deg = header['CDELT1']
+    del_y_deg = header['CDELT2']
     del_x    = header['CDELT1']*60.*60. # deg --> arcsec
     del_y    = header['CDELT2']*60.*60.
     nx       = header['NAXIS1']
@@ -380,7 +389,18 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
 
     # setting axes in relative coordinate
     if relativecoords:
-        refval_x, refval_y = [0,0]
+        if coord_center:
+            refra, refdec = coord_center.split(' ')
+            ref           = SkyCoord(refra, refdec, frame='icrs')
+            refra_deg     = ref.ra.degree   # in degree
+            refdec_deg    = ref.dec.degree  # in degree
+
+            off_ra_deg  = refra_deg - refval_x  # offset from reference pixcel (deg)
+            off_dec_deg = refdec_deg - refval_y
+            refval_x, refval_y = [-off_ra_deg*60.*60., -off_dec_deg*60.*60.]
+            print refval_x, refval_y
+        else:
+            refval_x, refval_y = [0,0]
         xlabel = 'RA offset (arcsec; J2000)'
         ylabel = 'Dec offset (arcsec; J2000)'
     else:
@@ -402,11 +422,18 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
     else:
         norm = mpl.colors.Normalize(vmin=vmin,vmax=vmax)
 
+    # mask
+    if mask:
+        d_formasking                         = data02
+        d_formasking[np.isnan(d_formasking)] = 0.
+        index_mask                           = np.where(d_formasking < mask)
+        data[index_mask]                     = np.nan
+
     ### ploting
     # setting figure
-    fig = plt.figure(figsize=(11.69,8.27))
+    fig = plt.figure(figsize=figsize)
     ax  = fig.add_subplot(111)
-    plt.rcParams['font.size'] = csize
+    plt.rcParams.update({'font.size':csize})
 
     # showing in color scale
     if data is not None:
@@ -414,10 +441,11 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
         imcolor = ax.imshow(data, cmap=cmap, origin='lower', extent=(xmin,xmax,ymin,ymax),norm=norm)
         # color bar
         if colorbar:
+            cbar_loc, cbar_wd, cbar_pad, cbar_lbl = cbaroptions
             divider = mpl_toolkits.axes_grid1.make_axes_locatable(ax)
-            cax     = divider.append_axes('right', '5%', pad='0%')
+            cax     = divider.append_axes(cbar_loc, cbar_wd, pad=cbar_pad)
             cbar    = fig.colorbar(imcolor, cax = cax)
-            cbar.set_label('Jy/beam')
+            cbar.set_label(cbar_lbl)
 
     if data02 is not None:
         imcont02 = ax.contour(data02, colors=ccolor, origin='lower',extent=(xmin,xmax,ymin,ymax), levels=clevels,linewidths=1)
@@ -426,18 +454,19 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
     figxmin, figxmax, figymin, figymax = imscale
     ax.set_xlim(figxmax,figxmin)
     ax.set_ylim(figymin,figymax)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
+    ax.set_xlabel(xlabel,fontsize=csize)
+    ax.set_ylabel(ylabel, fontsize=csize)
     if xticks != np.empty and yticks != np.empty:
         ax.set_xticks(xticks)
         ax.set_yticks(yticks)
     else:
         pass
     ax.set_aspect(1)
-    ax.tick_params(which='both', direction='in',bottom=True, top=True, left=True, right=True)
+    ax.tick_params(which='both', direction='in',bottom=True, top=True, left=True, right=True, labelsize=csize, pad=9, color=tickcolor, labelcolor=labelcolor)
 
     # plot beam size
-    beam    = patches.Ellipse(xy=(figxmax-locsym*figxmax, figymin-locsym*figymin), width=bmin, height=bmaj, fc=bcolor, angle=-bpa)
+    bmin_plot, bmaj_plot = ax.transLimits.transform((0,bmaj)) - ax.transLimits.transform((bmin,0))   # data --> Axes coordinate
+    beam = patches.Ellipse(xy=(0.1, 0.1), width=bmin_plot, height=bmaj_plot, fc=bcolor, angle=bpa, transform=ax.transAxes)
     ax.add_patch(beam)
 
     # central star position
@@ -446,16 +475,16 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
         ll = float(ll)
         lw = float(lw)
 
-        cross01 = patches.Arc(xy=(refval_x,refval_y), width=ll, height=0.001, lw=lw, color=cl,zorder=11)
-        cross02 = patches.Arc(xy=(refval_x,refval_y), width=0.001, height=ll, lw=lw, color=cl,zorder=12)
+        cross01 = patches.Arc(xy=(0,0), width=ll, height=0.001, lw=lw, color=cl,zorder=11) # xy=(refval_x,refval_y)
+        cross02 = patches.Arc(xy=(0,0), width=0.001, height=ll, lw=lw, color=cl,zorder=12)
         ax.add_patch(cross01)
         ax.add_patch(cross02)
 
     # scale bar
     if len(scalebar) == 0:
         pass
-    elif len(scalebar) == 7:
-        barx, bary, barlength, textx, texty, text, colors = scalebar
+    elif len(scalebar) == 8:
+        barx, bary, barlength, textx, texty, text, colors, barcsize = scalebar
 
         barx      = float(barx)
         bary      = float(bary)
@@ -463,11 +492,11 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
         textx     = float(textx)
         texty     = float(texty)
 
-        scale   = patches.Arc(xy=(barx,bary), width=barlength, height=0., lw=2, color=colors,zorder=10)
+        scale   = patches.Arc(xy=(barx,bary), width=barlength, height=0.001, lw=2, color=colors,zorder=10)
         ax.add_patch(scale)
-        ax.text(textx,texty,text,color=colors)
+        ax.text(textx,texty,text,color=colors,fontsize=barcsize,horizontalalignment='center',verticalalignment='center')
     else:
-        print 'scalebar must consist of 7 elements. Check scalebar.'
+        print 'scalebar must consist of 8 elements. Check scalebar.'
 
     fig.savefig(outname, transparent = True)
 
@@ -475,12 +504,13 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
 
 
 ### channel map
-def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=False,cbaron=False,cmap='Greys', vmin=None, vmax=None,
+def channelmap(fitsdata, outname=None, outformat='eps', imscale=[1], color=False,cbaron=False,cmap='Greys', vmin=None, vmax=None,
                 contour=True, clevels=np.array([0.15, 0.3, 0.45, 0.6, 0.75, 0.9]), ccolor='k',
                 nrow=5, ncol=5,velmin=None, velmax=None, nskip=1,
                 xticks=np.empty, yticks=np.empty, relativecoords=True, vsys=None, csize=9, scalebar=np.empty,
                 cstar=True, prop_star=np.array(['1','0.5','red']), locsym=0.2, logscale=False, tickcolor='k',axiscolor='k',
-                labelcolor='k',cbarlabel=None, txtcolor='k', bcolor='k', figsize=(8.27,11.69)):
+                labelcolor='k',cbarlabel=None, txtcolor='k', bcolor='k', figsize=(11.69,8.27), unit='arcsec',
+                cbarticks=None):
     '''
     Make channel maps from single image.
 
@@ -511,9 +541,10 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
     '''
 
     ### setting output file name & format
-    nmap = 1
+    #nmap = 1
     if (outformat == formatlist).any():
-        outfile = outname + '_nmap{0:02d}'.format(nmap) + '.' + outformat
+        #outfile = outname + '_nmap{0:02d}'.format(nmap) + '.' + outformat
+        outfile = outname + '.' + outformat
     else:
         print 'ERROR\tsingleim_to_fig: Outformat is wrong.'
         return
@@ -525,6 +556,7 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
     # reading header info.
     xlabel   = header['CTYPE1']
     ylabel   = header['CTYPE2']
+    vlabel   = header['CTYPE3']
     try:
         restfreq = header['RESTFRQ'] # Hz
     except:
@@ -547,14 +579,33 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
     unit     = header['BUNIT']
     print 'x, y axes are ', xlabel, ' and ', ylabel
 
+    if unit == 'arcsec':
+        pass
+    elif unit == 'arcmin':
+        pass
+    elif unit == 'deg' or unit == 'degree':
+        refval_x = refval_x/3600.
+        refval_y = refval_y/3600.
+        del_x    = del_x/3600.
+        del_y    = del_y/3600.
+        bmaj     = bmaj/3600.
+        bmin     = bmin/3600.
+
     # frequency --> velocity
-    print 'The third axis is [FREQUENCY]'
-    print 'Convert frequency to velocity'
-    del_v    = - del_v*clight/restfreq       # delf --> delv [cm/s]
-    del_v    = del_v*1.e-5                   # cm/s --> km/s
-    refval_v = clight*(1.-refval_v/restfreq) # radio velocity c*(1-f/f0) [cm/s]
-    refval_v = refval_v*1.e-5                # cm/s --> km/s
-    #print del_v
+    if vlabel == 'VRAD':
+        print 'The third axis is ', vlabel
+        del_v = del_v*1.e-3
+        refval_v = refval_v*1.e-3
+        pass
+    else:
+        print 'The third axis is [FREQUENCY]'
+        print 'Convert frequency to velocity'
+        del_v    = - del_v*clight/restfreq       # delf --> delv [cm/s]
+        del_v    = del_v*1.e-5                   # cm/s --> km/s
+        refval_v = clight*(1.-refval_v/restfreq) # radio velocity c*(1-f/f0) [cm/s]
+        refval_v = refval_v*1.e-5                # cm/s --> km/s
+        #print refval_v
+
 
     # setting axes in relative coordinate
     if relativecoords:
@@ -577,10 +628,18 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
     # check data axes
     if len(data.shape) == 4:
         pass
+    elif len(data.shape) == 3:
+        data = data.reshape((1,nchan,ny,nx))
     else:
-        print 'Error\tsingleim_to_fig: Input fits size is not corrected.\
+        print 'Error\tchannelmap: Input fits size is not corrected.\
          It is allowed only to have 3 or 4 axes. Check the shape of the fits file.'
         return
+
+
+    if del_v < 0:
+        del_v = - del_v
+        data  = data[:,::-1,:,:]
+        refpix_v = nchan - refpix_v + 1
 
     # set colorscale
     if vmax:
@@ -609,9 +668,14 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
             axes_pad=0,share_all=True,cbar_mode=cbar_mode)
 
     # setting parameters used to plot
+    if len(imscale) == 1:
+        figxmin, figxmax, figymin, figymax = [xmax,xmin,ymin,ymax]
+    elif len(imscale) == 4:
+        figxmin, figxmax, figymin, figymax = imscale
+    else:
+        print 'ERROR\tchannelmap: Input imscale is wrong. Must be [xmin, xmax, ymin, ymax]'
     i, j, gridi = [0,0,0]
     gridimax    = nrow*ncol-1
-    figxmin, figxmax, figymin, figymax = imscale
     xscale = np.abs((figxmax - figxmin)*0.5)
     yscale = np.abs((figymax - figymin)*0.5)
 
@@ -627,10 +691,10 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
         vnchan = refval_v + (ichan + 1 - refpix_v)*del_v
 
         # check whether vnchan in setted velocity range
-        if velmax:
+        if velmax is not None:
             if vnchan < velmin or vnchan > velmax:
                 continue
-        elif velmin:
+        elif velmin is not None:
             if vnchan < velmin:
                 continue
         else:
@@ -661,13 +725,14 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
         else:
             pass
         ax.set_aspect(1)
-        ax.tick_params(which='both', direction='in',bottom=True, top=True, left=True, right=True,colors=tickcolor)
+        ax.tick_params(which='both', direction='in',bottom=True, top=True, left=True, right=True, color=tickcolor, labelcolor=labelcolor, pad=9, labelsize=csize)
 
         # velocity
         #vlabel = AnchoredText('%03.2f'%vnchan,loc=2,frameon=False)
         #ax.add_artist(vlabel)
-        vlabel = '%03.2f'%vnchan
-        ax.text(figxmax-locsym*3.*xscale, figymax-locsym*3.*yscale,vlabel,color=txtcolor,size=csize)
+        vlabel = '%3.2f'%vnchan
+        #ax.text(figxmax-locsym*3.*xscale, figymax-locsym*3.*yscale,vlabel,color=txtcolor,size=csize)
+        ax.text(0.1, 0.9,vlabel,color=txtcolor,size=csize,horizontalalignment='left',verticalalignment='top',transform=ax.transAxes)
 
         # only on the bottom corner pannel
         if i == nrow-1 and j == 0:
@@ -677,10 +742,11 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
             ax.yaxis.label.set_color(labelcolor)
 
             # plot beam size
-            beam = patches.Ellipse(xy=(figxmax-locsym*xscale, figymin+locsym*yscale), width=bmin, height=bmaj, fc=bcolor, angle=-bpa)
+            #beam_test = patches.Ellipse(xy=(5, -5), width=bmin, height=bmaj, fc='red', angle=-bpa, alpha=0.5)
+            #ax.add_patch(beam_test)
+            bmin_plot, bmaj_plot = ax.transLimits.transform((0,bmaj)) - ax.transLimits.transform((bmin,0))   # data --> Axes coordinate
+            beam = patches.Ellipse(xy=(0.1, 0.1), width=bmin_plot, height=bmaj_plot, fc=bcolor, angle=bpa, transform=ax.transAxes)
             ax.add_patch(beam)
-            #beam = AnchoredEllipse(ax.transData,width=bmin, height=bmaj, angle=-bpa,loc=3, pad=0.5, borderpad=0.4, frameon=False)
-            #ax.add_artist(beam)
 
             # scale bar
             if scalebar is np.empty:
@@ -725,7 +791,7 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
             #plt.subplots_adjust(wspace=0., hspace=0.)
             if cbaron:
                 # With cbar_mode="single", cax attribute of all axes are identical.
-                cbar = ax.cax.colorbar(imcolor)
+                cbar = ax.cax.colorbar(imcolor,ticks=cbarticks)
                 ax.cax.toggle_label(True)
                 cbar.ax.yaxis.set_tick_params(color=tickcolor) # tick color
                 cbar.ax.spines["bottom"].set_color(axiscolor)  # axes color
@@ -737,8 +803,8 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
 
             fig.savefig(outfile, transparent = True)
             fig.clf()
-            nmap      = nmap+1
-            outfile   = outname + '_nmap{0:02d}'.format(nmap) + '.' + outformat
+            #nmap      = nmap+1
+            #outfile   = outname + '_nmap{0:02d}'.format(nmap) + '.' + outformat
             fig       = plt.figure(figsize=figsize)
             grid      = ImageGrid(fig, rect=111, nrows_ncols=(nrow,ncol),
                 axes_pad=0,share_all=True,cbar_mode=cbar_mode)
@@ -746,7 +812,7 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
 
     if color:
         # With cbar_mode="single", cax attribute of all axes are identical.
-        cbar = ax.cax.colorbar(imcolor)
+        cbar = ax.cax.colorbar(imcolor,ticks=cbarticks)
         ax.cax.toggle_label(True)
         cbar.ax.yaxis.set_tick_params(color=tickcolor) # tick color
         cbar.ax.spines["bottom"].set_color(axiscolor)  # axes color
@@ -771,6 +837,7 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
         #plt.subplots_adjust(wspace=0, hspace=0)
         fig.savefig(outfile, transparent = True)
 
+    '''
     # convert N maps into one map
     # ImageMagick is needed
     try:
@@ -782,6 +849,7 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
     except:
         print 'Cannot convert N maps into one pdf file.'
         print 'Install ImageMagick if you want.'
+    '''
 
     return ax
 
@@ -790,11 +858,11 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=None, color=Fals
 
 ### channel map
 def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, cmap='Greys', vmin=None, vmax=None,
-                clevels=np.array([0.15, 0.3, 0.45, 0.6, 0.75, 0.9]), ccolor='k',
-                nrow=5, ncol=5,velmin=None, velmax=None, nskip=1,
-                xticks=np.empty, yticks=np.empty, relativecoords=True, vsys=None, csize=9, scalebar=np.empty,
+                imoption='clcn', clevels=np.array([0.15, 0.3, 0.45, 0.6, 0.75, 0.9]), ccolor='k',
+                nrow=5, ncol=5,velmin=None, velmax=None, nskip=1,colorbar=True,
+                xticks=np.empty(0), yticks=np.empty(0), relativecoords=True, vsys=None, csize=9, scalebar=np.empty,
                 cstar=True, locsym=0.2, logscale=False, tickcolor='k',axiscolor='k',labelcolor='k',cbarlabel=None, txtcolor='k',
-                bcolor='k', figsize=(8.27,11.69)):
+                bcolor='k', figsize=(11.69,8.27), ccolor2='red', lw2=0.5,alpha2=1):
     '''
     Make channel maps from images.
 
@@ -825,18 +893,17 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
     '''
 
     ### setting output file name & format
-    nmap = 1
+    #nmap = 1
     if (outformat == formatlist).any():
-        outfile = outname + '_nmap{0:02d}'.format(nmap) + '.' + outformat
+        #outfile = outname + '_nmap{0:02d}'.format(nmap) + '.' + outformat
+        outfile   = outname + '.' + outformat
     else:
         print 'ERROR\tsingleim_to_fig: Outformat is wrong.'
         return
 
 
     ### reading fits files
-    # color image
     data01, hd01 = fits.getdata(fits01,header=True)
-    # contour image
     data02, hd02 = fits.getdata(fits02,header=True)
 
     # reading hd01 info.
@@ -884,11 +951,61 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
     xmax = refval_x + (nx - refpix_x)*del_x + 0.5*del_x
     ymin = refval_y + (1 - refpix_y)*del_y - 0.5*del_y
     ymax = refval_y + (ny - refpix_y)*del_y + 0.5*del_y
+    extent01 = (xmin,xmax,ymin,ymax)
 
     # setting velocity axis in relative velocity
     if vsys:
         refval_v = refval_v - vsys
         #print refval_v
+
+
+
+    # reading hd02 info.
+    xlabel02   = hd02['CTYPE1']
+    ylabel02   = hd02['CTYPE2']
+    try:
+        restfreq02 = hd02['RESTFRQ'] # Hz
+    except:
+        restfreq02 = hd02['RESTFREQ'] # Hz
+    refval_x02 = hd02['CRVAL1']*60.*60. # deg --> arcsec
+    refval_y02 = hd02['CRVAL2']*60.*60.
+    refval_v02 = hd02['CRVAL3']
+    refpix_x02 = int(hd02['CRPIX1'])
+    refpix_y02 = int(hd02['CRPIX2'])
+    refpix_v02 = int(hd02['CRPIX3'])
+    del_x02    = hd02['CDELT1']*60.*60. # deg --> arcsec
+    del_y02    = hd02['CDELT2']*60.*60.
+    del_v02    = hd02['CDELT3']
+    nx02       = hd02['NAXIS1']
+    ny02       = hd02['NAXIS2']
+    nchan02    = hd02['NAXIS3']
+    bmaj02     = hd02['BMAJ']*60.*60.
+    bmin02     = hd02['BMIN']*60.*60.
+    bpa02      = hd02['BPA']  # [deg]
+    unit02     = hd02['BUNIT']
+    print 'x, y axes are ', xlabel02, ' and ', ylabel02
+
+    # frequency --> velocity
+    print 'The third axis is [FREQUENCY]'
+    print 'Convert frequency to velocity'
+    del_v02    = - del_v02*clight/restfreq02       # delf --> delv [cm/s]
+    del_v02    = del_v02*1.e-5                   # cm/s --> km/s
+    refval_v02 = clight*(1.-refval_v02/restfreq02) # radio velocity c*(1-f/f0) [cm/s]
+    refval_v02 = refval_v02*1.e-5                # cm/s --> km/s
+    #print del_v
+
+    # setting axes in relative coordinate
+    if relativecoords:
+        refval_x02, refval_y02 = [0,0]
+        xlabel02 = 'RA offset (arcsec; J2000)'
+        ylabel02 = 'Dec offset (arcsec; J2000)'
+    else:
+        pass
+    xmin02 = refval_x02 + (1 - refpix_x02)*del_x02 - 0.5*del_x02
+    xmax02 = refval_x02 + (nx02 - refpix_x02)*del_x02 + 0.5*del_x02
+    ymin02 = refval_y02 + (1 - refpix_y02)*del_y02 - 0.5*del_y02
+    ymax02 = refval_y02 + (ny02 - refpix_y02)*del_y02 + 0.5*del_y02
+    extent02 = (xmin02,xmax02,ymin02,ymax02)
 
 
     # check data axes
@@ -916,10 +1033,10 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
     plt.rcParams['font.size'] = csize
     fig = plt.figure(figsize=figsize)
     # setting colorbar
-    #if color:
-    cbar_mode = 'single'
-    #else:
-        #cbar_mode= None
+    if colorbar:
+        cbar_mode = 'single'
+    else:
+        cbar_mode = None
 
     # setting grid
     grid = ImageGrid(fig, rect=111, nrows_ncols=(nrow,ncol),
@@ -937,9 +1054,6 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
         ichan   = k*nskip
         if ichan >= nchan:
             break
-
-        color   = data01[0,ichan,:,:]
-        contour = data02[0,ichan,:,:]
 
         # velocity at nchan
         vnchan = refval_v + (ichan + 1 - refpix_v)*del_v
@@ -959,10 +1073,36 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
         ax = grid[gridi]
         print 'channel ', '%s'%ichan, ', velocity: ', '%4.2f'%vnchan, ' km/s'
 
-        # showing in color scale
-        imcolor = ax.imshow(color, cmap=cmap, origin='lower', extent=(xmin,xmax,ymin,ymax),norm=norm)
 
-        imcont  = ax.contour(contour, colors=ccolor, origin='lower',extent=(xmin,xmax,ymin,ymax), levels=clevels, linewidths=0.5)
+        if imoption == 'clcn':
+            color   = data01[0,ichan,:,:]
+            contour = data02[0,ichan,:,:]
+            # showing in color scale
+            imcolor = ax.imshow(color, cmap=cmap, origin='lower', extent=extent01,norm=norm)
+            imcont  = ax.contour(contour, colors=ccolor, origin='lower',extent=extent02, levels=clevels, linewidths=0.5)
+        elif imoption == 'cncl':
+            color   = data02[0,ichan,:,:]
+            contour = data01[0,ichan,:,:]
+            imcolor = ax.imshow(color, cmap=cmap, origin='lower', extent=extent02,norm=norm)
+            imcont  = ax.contour(contour, colors=ccolor, origin='lower',extent=extent01, levels=clevels, linewidths=0.5)
+        elif imoption == 'cncn':
+            contour01 = data01[0,ichan,:,:]
+            contour02 = data02[0,ichan,:,:]
+            imcont01  = ax.contour(contour01, colors=ccolor, origin='lower',extent=extent01, levels=clevels, linewidths=0.5)
+            imcont02  = ax.contour(contour02, colors=ccolor2, origin='lower',extent=extent02, levels=clevels, linewidths=lw2,alpha=alpha2)
+            colorbar  = False
+
+        if colorbar:
+            cbar = ax.cax.colorbar(imcolor)
+            ax.cax.toggle_label(True)
+            cbar.ax.yaxis.set_tick_params(color=tickcolor) # tick color
+            cbar.ax.spines["bottom"].set_color(axiscolor)  # axes color
+            cbar.ax.spines["top"].set_color(axiscolor)
+            cbar.ax.spines["left"].set_color(axiscolor)
+            cbar.ax.spines["right"].set_color(axiscolor)
+            if cbarlabel:
+                cbar.ax.set_ylabel(cbarlabel, color=labelcolor) # label
+            colorbar = False
 
         # set axes
         ax.set_xlim(figxmax,figxmin)
@@ -971,19 +1111,23 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
         ax.spines["top"].set_color(axiscolor)
         ax.spines["left"].set_color(axiscolor)
         ax.spines["right"].set_color(axiscolor)
-        if xticks != np.empty and yticks != np.empty:
+        if len(xticks) == 0 and len(yticks) == 0:
+            pass
+        elif len(xticks) != 0 and len(yticks) == 0:
             ax.set_xticks(xticks)
+        elif len(xticks) == 0 and len(yticks) != 0:
             ax.set_yticks(yticks)
         else:
-            pass
+            ax.set_xticks(xticks)
+            ax.set_yticks(yticks)
         ax.set_aspect(1)
-        ax.tick_params(which='both', direction='in',bottom=True, top=True, left=True, right=True,colors=tickcolor)
+        ax.tick_params(which='both', direction='in',bottom=True, top=True, left=True, right=True, color=tickcolor, labelcolor=labelcolor, pad=9, labelsize=csize)
 
         # velocity
         #vlabel = AnchoredText('%03.2f'%vnchan,loc=2,frameon=False)
         #ax.add_artist(vlabel)
         vlabel = '%03.2f'%vnchan
-        ax.text(figxmax-locsym*figxmax, figymax-locsym*figymax,vlabel,color=txtcolor,size=csize)
+        ax.text(0.1, 0.9,vlabel,color=txtcolor,size=csize,horizontalalignment='left',verticalalignment='top',transform=ax.transAxes)
 
         # only on the bottom corner pannel
         if i == nrow-1 and j == 0:
@@ -1033,30 +1177,17 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
             i = i + 1
 
         if i == nrow:
-            #gs.tight_layout(fig,h_pad=0,w_pad=0)
-            #plt.subplots_adjust(wspace=0., hspace=0.)
-
-            # With cbar_mode="single", cax attribute of all axes are identical.
-            cbar = ax.cax.colorbar(imcolor)
-            ax.cax.toggle_label(True)
-            cbar.ax.yaxis.set_tick_params(color=tickcolor) # tick color
-            cbar.ax.spines["bottom"].set_color(axiscolor)  # axes color
-            cbar.ax.spines["top"].set_color(axiscolor)
-            cbar.ax.spines["left"].set_color(axiscolor)
-            cbar.ax.spines["right"].set_color(axiscolor)
-            if cbarlabel:
-                cbar.ax.set_ylabel(cbarlabel, color=labelcolor) # label
-
             fig.savefig(outfile, transparent = True)
             fig.clf()
-            nmap      = nmap+1
-            outfile   = outname + '_nmap{0:02d}'.format(nmap) + '.' + outformat
+            #nmap      = nmap+1
+            #outfile   = outname + '_nmap{0:02d}'.format(nmap) + '.' + outformat
             fig       = plt.figure(figsize=figsize)
             grid      = ImageGrid(fig, rect=111, nrows_ncols=(nrow,ncol),
                 axes_pad=0,share_all=True,cbar_mode=cbar_mode)
             i,j,gridi = [0,0,0]
 
 
+    '''
     # With cbar_mode="single", cax attribute of all axes are identical.
     cbar = ax.cax.colorbar(imcolor)
     ax.cax.toggle_label(True)
@@ -1067,6 +1198,7 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
     cbar.ax.spines["right"].set_color(axiscolor)
     if cbarlabel:
         cbar.ax.set_ylabel(cbarlabel,color=labelcolor) # label
+    '''
 
     if gridi != gridimax+1 and gridi != 0:
         while gridi != gridimax+1:
@@ -1083,6 +1215,7 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
         #plt.subplots_adjust(wspace=0, hspace=0)
         fig.savefig(outfile, transparent = True)
 
+    '''
     # convert N maps into one map
     # ImageMagick is needed
     try:
@@ -1094,6 +1227,7 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
     except:
         print 'Cannot convert N maps into one pdf file.'
         print 'Install ImageMagick if you want.'
+    '''
 
     return ax
 
@@ -1223,7 +1357,7 @@ def pvdiagram(fitsdata,outname,outformat='eps',color=True,cmap='Greys',
     # lines showing offset 0 and relative velocity 0
     xline = plt.hlines(hline_params[0], hline_params[1], hline_params[2], ccolor, linestyles='dashed', linewidths = 0.5)
     yline = plt.vlines(vline_params[0], vline_params[1], vline_params[2], ccolor, linestyles='dashed', linewidths = 0.5)
-    ax.tick_params(which='both', direction='in',bottom=True, top=True, left=True, right=True)
+    ax.tick_params(which='both', direction='in',bottom=True, top=True, left=True, right=True, pad=9)
 
 
     # aspect ratio
