@@ -16,6 +16,7 @@ from matplotlib.offsetbox import AnchoredText
 import matplotlib as mpl
 from astropy import units as u
 from astropy.coordinates import SkyCoord
+import copy
 #plt.style.use('seaborn-dark')
 #plt.style.use('ggplot')
 #plt.style.use('seaborn-deep')
@@ -57,12 +58,12 @@ def change_aspect_ratio(ax, ratio):
     ax.set_aspect(aspect)
 
 
-def Idistmap(fitsdata, outname=None, imscale=None, outformat='eps', color=True, cmap='Greys',
+def Idistmap(fitsdata, ax=None, outname=None, imscale=None, outformat='eps', color=True, cmap='Greys',
              colorbar=False, cbaroptions=np.array(['right','5%','0%','Jy/beam']), vmin=None,vmax=None,
-             contour=True, clevels=np.array([0.15, 0.3, 0.45, 0.6, 0.75, 0.9]), ccolor='k',
+             contour=True, clevels=np.array([0.15, 0.3, 0.45, 0.6, 0.75, 0.9]), ccolor='k', mask=None,
              xticks=np.empty, yticks=np.empty, relativecoords=True, csize=9, scalebar=np.empty(0),
              cstar=True, prop_star=np.array(['1','0.5','white']), locsym=0.1, bcolor='k',figsize=(11.69,8.27),
-             tickcolor='k',axiscolor='k',labelcolor='k'):
+             tickcolor='k',axiscolor='k',labelcolor='k',coord_center=None):
     '''
     Make a figure from single image.
 
@@ -150,17 +151,28 @@ def Idistmap(fitsdata, outname=None, imscale=None, outformat='eps', color=True, 
 
     ### ploting
     # setting figure
-    fig = plt.figure(figsize=figsize)
-    ax  = fig.add_subplot(111)
+    if ax is not None:
+        pass
+    else:
+        fig = plt.figure(figsize=figsize)
+        ax  = fig.add_subplot(111)
+
     plt.rcParams['font.size'] = csize
     #print 'start plot'
+
+    # mask
+    if mask:
+        #d_formasking                         = data
+        #d_formasking[np.isnan(d_formasking)] = 0.
+        index_mask                           = np.where(data < mask)
+        data[index_mask]                     = np.nan
 
     # showing in color scale
     if color:
         # color image
         imcolor = ax.imshow(data, cmap=cmap, origin='lower', extent=(xmin,xmax,ymin,ymax),vmin=vmin,vmax=vmax)
         # color bar
-        print 'plot color'
+        #print 'plot color'
         if colorbar:
             cbar_loc, cbar_wd, cbar_pad, cbar_lbl = cbaroptions
             divider = mpl_toolkits.axes_grid1.make_axes_locatable(ax)
@@ -220,14 +232,14 @@ def Idistmap(fitsdata, outname=None, imscale=None, outformat='eps', color=True, 
     else:
         print 'scalebar must be 8 elements. Check scalebar.'
 
-    fig.savefig(outname, transparent = True)
+    plt.savefig(outname, transparent = True)
 
     return ax
 
 
 
 ### moment maps
-def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='Greys',
+def multiIdistmap(fitsdata, ax=None, outname=None, imscale=[], outformat='pdf', cmap='Greys',
              colorbar=False, cbaroptions=np.array(['right','5%','0%','Jy/beam']), vmin=None, vmax=None,
              clevels=np.array([0.15, 0.3, 0.45, 0.6, 0.75, 0.9]), ccolor='k',mask=None,
              xticks=np.empty, yticks=np.empty, relativecoords=True, csize=9, scalebar=np.empty(0),
@@ -377,38 +389,225 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
     refpix_y = int(header['CRPIX2'])
     del_x_deg = header['CDELT1']
     del_y_deg = header['CDELT2']
-    del_x    = header['CDELT1']*60.*60. # deg --> arcsec
-    del_y    = header['CDELT2']*60.*60.
+    del_x    = header['CDELT1'] # deg --> arcsec
+    del_y    = header['CDELT2']
     nx       = header['NAXIS1']
     ny       = header['NAXIS2']
-    bmaj     = header['BMAJ']*60.*60.
-    bmin     = header['BMIN']*60.*60.
+    bmaj     = header['BMAJ']
+    bmin     = header['BMIN']
     bpa      = header['BPA']  # [deg]
     unit     = header['BUNIT']
+    phi_p    = header['LONPOLE']
     print 'x, y axes are ', xlabel, ' and ', ylabel
+    try:
+        projection = xlabel.replace('RA---','')
+    except:
+        'Cannot read information about projection from fits file.'
+        'Set projection SIN for radio interferometric data.'
+        projection = 'SIN'
 
-    # setting axes in relative coordinate
-    if relativecoords:
-        if coord_center:
-            refra, refdec = coord_center.split(' ')
-            ref           = SkyCoord(refra, refdec, frame='icrs')
-            refra_deg     = ref.ra.degree   # in degree
-            refdec_deg    = ref.dec.degree  # in degree
 
-            off_ra_deg  = refra_deg - refval_x  # offset from reference pixcel (deg)
-            off_dec_deg = refdec_deg - refval_y
-            refval_x, refval_y = [-off_ra_deg*60.*60., -off_dec_deg*60.*60.]
-            print refval_x, refval_y
-        else:
-            refval_x, refval_y = [0,0]
-        xlabel = 'RA offset (arcsec; J2000)'
-        ylabel = 'Dec offset (arcsec; J2000)'
+    # pixel to coordinate
+    # 1. pixels --> (x,y)
+    # edges of the image
+    xmin = (1 - refpix_x)*del_x - 0.5*del_x
+    xmax = (nx - refpix_x)*del_x + 0.5*del_x
+    ymin = (1 - refpix_y)*del_y - 0.5*del_y
+    ymax = (ny - refpix_y)*del_y + 0.5*del_y
+    #print xmin, xmax, ymin, ymax
+
+
+    # 2. (x,y) --> (phi, theta): native coordinate
+    # correct projection effect, and then put into polar coordinates
+    # For detail, look into Mark R. Calabretta and Eric W. Greisen (A&A, 2002)
+    if projection == 'SIN':
+        #print 'projection: SIN'
+        phi_min = np.arctan2(xmin,-ymin)*180./np.pi                               # at xmin, ymin
+        the_min = np.arccos(np.sqrt(xmin*xmin + ymin*ymin)*np.pi/180.)*180./np.pi # at xmin, ymin
+        phi_max = np.arctan2(xmax,-ymax)*180./np.pi                               # at xmax, ymax
+        the_max = np.arccos(np.sqrt(xmax*xmax + ymax*ymax)*np.pi/180.)*180./np.pi # at xmax, ymax
+        alpha_0 = refval_x
+        delta_0 = refval_y
+        alpha_p = alpha_0
+        delta_p = delta_0
+        the_0   = 90. # degree
+        phi_0   = 0.
+        print phi_min, phi_max, the_min, the_max
+    elif projection == 'SFL':
+        # (ra, dec) of reference position is (0,0) in (phi, theta) and (x,y)
+        # (0,0) is on a equatorial line, and (0, 90) is the pole in a native spherical coordinate
+        #print 'projection: SFL'
+        cos = np.cos(np.radians(ymin))
+        phi_min = xmin/cos
+        the_min = ymin
+        cos = np.cos(np.radians(ymax))
+        phi_max = xmax/cos
+        the_max = ymax
+        alpha_0 = refval_x
+        delta_0 = refval_y
+        the_0   = 0.
+        phi_0   = 0.
+        alpha_p = None
+        delta_p = None
     else:
+        print 'ERROR: Input value of projection is wrong. Can be only SIN or SFL now.'
         pass
-    xmin = refval_x + (1 - refpix_x)*del_x - 0.5*del_x
-    xmax = refval_x + (nx - refpix_x)*del_x + 0.5*del_x
-    ymin = refval_y + (1 - refpix_y)*del_y - 0.5*del_y
-    ymax = refval_y + (ny - refpix_y)*del_y + 0.5*del_y
+
+
+    # 3. (phi, theta) --> (ra, dec) (sky plane)
+    # Again, for detail, look into Mark R. Calabretta and Eric W. Greisen (A&A, 2002)
+    if relativecoords and (coord_center is None):
+        # no transform from native coordinate to cerestial coordinate
+        #extent = (phi_min*60*60, phi_max*60*60, the_min*60*60, the_max*60*60)
+        extent = (xmin*60*60, xmax*60*60, ymin*60*60, ymax*60*60)
+        bmaj = bmaj*60.*60.
+        bmin = bmin*60.*60.
+        pos_cstar = (0,0)
+        xlabel = 'RA offset (arcsec)'
+        ylabel = 'DEC offset (arcsec)'
+        #print extent
+    else:
+        #print 'Now only relative coordinate is available.'
+        # (alpha_p, delta_p): cerestial coordinate of the native coordinate pole
+        # In SFL projection, reference point is not polar point
+
+        # parameters
+        sin_th0 = np.sin(np.radians(the_0))
+        cos_th0 = np.cos(np.radians(the_0))
+        sin_del0 = np.sin(np.radians(delta_0))
+        cos_del0 = np.cos(np.radians(delta_0))
+
+        # delta_p
+        if delta_p:
+            pass
+        else:
+            argy    = sin_th0
+            argx    = cos_th0*np.cos(np.radians(phi_p-phi_0))
+            arg     = np.arctan2(argy,argx)
+            #print arg
+
+            cos_inv  = np.arccos(sin_del0/(np.sqrt(1. - cos_th0*cos_th0*np.sin(phi_p - phi_0)*np.sin(phi_p - phi_0))))
+
+            delta_p = (arg + cos_inv)*180./np.pi
+
+            if (-90. > delta_p) or (delta_p > 90.):
+                delta_p = (arg - cos_inv)*180./np.pi
+
+            if (-90. > delta_p) or (delta_p > 90.):
+                print 'No valid delta_p. Use value in LATPOLE.'
+                delta_p = header['LATPOLE']
+
+        sin_delp = np.sin(np.radians(delta_p))
+        cos_delp = np.cos(np.radians(delta_p))
+
+        # alpha_p
+        if alpha_p:
+            pass
+        else:
+            sin_alpha_p = np.sin(np.radians(phi_p - phi_0))*cos_th0/cos_del0
+            cos_alpha_p = sin_th0 - sin_delp*sin_del0/(cos_delp*cos_del0)
+            #print sin_alpha_p, cos_alpha_p
+            #print np.arctan2(sin_alpha_p,cos_alpha_p)*180./np.pi
+            alpha_p = alpha_0 - np.arctan2(sin_alpha_p,cos_alpha_p)*180./np.pi
+            #print alpha_p
+
+
+        # ra, dec of map edges
+        # ra min, ra value at (1,1) in pixel
+        sin_th = np.sin(np.radians(the_min))
+        cos_th = np.cos(np.radians(the_min))
+
+        argy = -cos_th*np.sin(np.radians(phi_min-phi_p))
+        argx = sin_th*cos_delp - cos_th*sin_delp*np.cos(np.radians(phi_min-phi_p))
+        alpha_min = alpha_p + np.arctan2(argy,argx)*180./np.pi
+
+        if (alpha_min < 0.):
+            alpha_min = alpha_min + 360.
+        elif (alpha_min > 360.):
+            alpha_min = alpha_min - 360.
+
+        # ra max, ra value at (nx,ny) in pixel
+        sin_th = np.sin(np.radians(the_max))
+        cos_th = np.cos(np.radians(the_max))
+        argy = -cos_th*np.sin(np.radians(phi_max-phi_p))
+        argx = sin_th*cos_delp - cos_th*sin_delp*np.cos(np.radians(phi_max-phi_p))
+        alpha_max = alpha_p + np.arctan2(argy,argx)*180./np.pi
+
+        if (alpha_max < 0.):
+            alpha_max = alpha_max + 360.
+        elif (alpha_max > 360.):
+            alpha_max = alpha_max - 360.
+
+        #print alpha_min, alpha_max
+
+        # dec min, dec value at (1,1) in pixel
+        sin_th = np.sin(np.radians(the_min))
+        cos_th = np.cos(np.radians(the_min))
+        in_sin = sin_th*sin_delp+cos_th*cos_delp*np.cos(np.radians(phi_min-phi_p))
+        del_min = np.arcsin(in_sin)*180./np.pi
+
+        # dec max, dec value at (nx,ny) in pixel
+        sin_th = np.sin(np.radians(the_max))
+        cos_th = np.cos(np.radians(the_max))
+        in_sin = sin_th*sin_delp+cos_th*cos_delp*np.cos(np.radians(phi_max-phi_p))
+        del_max = np.arcsin(in_sin)*180./np.pi
+
+        #print del_min, del_max
+
+        extent = (alpha_min,alpha_max,del_min,del_max)
+
+        pos_cstar = (refval_x,refval_y)
+        #print extent
+        #return
+
+
+
+    # set coordinate center
+    if coord_center:
+        # ra, dec
+        refra, refdec = coord_center.split(' ')
+        ref           = SkyCoord(refra, refdec, frame='icrs')
+        refra_deg     = ref.ra.degree   # in degree
+        refdec_deg    = ref.dec.degree  # in degree
+        if relativecoords:
+            sin_delref = np.sin(np.radians(refdec_deg))
+            cos_delref = np.cos(np.radians(refdec_deg))
+            argx = sin_delref*cos_delp - cos_delref*sin_delp*np.cos(np.radians(refra_deg-alpha_p))
+            argy = -cos_delref*np.sin(np.radians(refra_deg-alpha_p))
+            arg  = np.arctan2(argy,argx)
+
+            phi_ref  = phi_p + arg*180./np.pi
+
+            in_sin = sin_delref*sin_delp + cos_delref*cos_delp*np.cos(np.radians(refra_deg-alpha_p))
+
+            the_ref = np.arcsin(in_sin)*180./np.pi
+
+            # (phi, theta) --> (x,y)
+            if projection == 'SIN':
+                rxy = np.cos(np.radians(the_ref))*180./np.pi
+                x_ref = rxy*np.sin(np.radians(phi_ref))
+                y_ref = -rxy*np.cos(np.radians(phi_ref))
+            elif projection == 'SFL':
+                x_ref = phi_ref*np.cos(np.radians(the_ref))
+                y_ref = the_ref
+
+            refval_x, refval_y = [-x_ref*60.*60., -y_ref*60.*60.]
+            #print refval_x, refval_y
+
+            extent = (xmin*60*60+refval_x, xmax*60*60+refval_x, ymin*60*60+refval_y, ymax*60*60+refval_y)
+            #print extent
+
+            bmaj = bmaj*60.*60.
+            bmin = bmin*60.*60.
+            pos_cstar = (0,0)
+
+            xlabel = 'RA offset (arcsec)'
+            ylabel = 'DEC offset (arcsec)'
+            #print refval_x, refval_y
+        else:
+            # no meaning but...
+            refval_x, refval_y = [refra_deg,refdec_deg]
+            pos_cstar = (refval_x,refval_y)
 
     # set colorscale
     if vmax:
@@ -422,6 +621,14 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
     else:
         norm = mpl.colors.Normalize(vmin=vmin,vmax=vmax)
 
+    # setting parameters used to plot
+    if len(imscale) == 0:
+        figxmin, figxmax, figymin, figymax = extent
+    elif len(imscale) == 4:
+        figxmax, figxmin, figymin, figymax = imscale
+    else:
+        print 'ERROR\tchannelmap: Input imscale is wrong. Must be [xmin, xmax, ymin, ymax]'
+
     # mask
     if mask:
         d_formasking                         = data02
@@ -431,14 +638,18 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
 
     ### ploting
     # setting figure
-    fig = plt.figure(figsize=figsize)
-    ax  = fig.add_subplot(111)
+    if ax is not None:
+        pass
+    else:
+        fig = plt.figure(figsize=figsize)
+        ax  = fig.add_subplot(111)
+
     plt.rcParams.update({'font.size':csize})
 
     # showing in color scale
     if data is not None:
         # color image
-        imcolor = ax.imshow(data, cmap=cmap, origin='lower', extent=(xmin,xmax,ymin,ymax),norm=norm)
+        imcolor = ax.imshow(data, origin='lower', cmap=cmap, extent=extent,norm=norm)
         # color bar
         if colorbar:
             cbar_loc, cbar_wd, cbar_pad, cbar_lbl = cbaroptions
@@ -448,11 +659,10 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
             cbar.set_label(cbar_lbl)
 
     if data02 is not None:
-        imcont02 = ax.contour(data02, colors=ccolor, origin='lower',extent=(xmin,xmax,ymin,ymax), levels=clevels,linewidths=1)
+        imcont02 = ax.contour(data02, colors=ccolor, origin='lower',extent=extent, levels=clevels,linewidths=1)
 
     # set axes
-    figxmin, figxmax, figymin, figymax = imscale
-    ax.set_xlim(figxmax,figxmin)
+    ax.set_xlim(figxmin,figxmax)
     ax.set_ylim(figymin,figymax)
     ax.set_xlabel(xlabel,fontsize=csize)
     ax.set_ylabel(ylabel, fontsize=csize)
@@ -475,8 +685,8 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
         ll = float(ll)
         lw = float(lw)
 
-        cross01 = patches.Arc(xy=(0,0), width=ll, height=0.001, lw=lw, color=cl,zorder=11) # xy=(refval_x,refval_y)
-        cross02 = patches.Arc(xy=(0,0), width=0.001, height=ll, lw=lw, color=cl,zorder=12)
+        cross01 = patches.Arc(xy=pos_cstar, width=ll, height=0.001, lw=lw, color=cl,zorder=11) # xy=(refval_x,refval_y)
+        cross02 = patches.Arc(xy=pos_cstar, width=0.001, height=ll, lw=lw, color=cl,zorder=12)
         ax.add_patch(cross01)
         ax.add_patch(cross02)
 
@@ -498,19 +708,19 @@ def multiIdistmap(fitsdata, outname=None, imscale=None, outformat='eps', cmap='G
     else:
         print 'scalebar must consist of 8 elements. Check scalebar.'
 
-    fig.savefig(outname, transparent = True)
+    plt.savefig(outname, transparent = True)
 
     return ax
 
 
 ### channel map
-def channelmap(fitsdata, outname=None, outformat='eps', imscale=[1], color=False,cbaron=False,cmap='Greys', vmin=None, vmax=None,
+def channelmap(fitsdata, outname=None, outformat='pdf', imscale=[1], color=False,cbaron=False,cmap='Greys', vmin=None, vmax=None,
                 contour=True, clevels=np.array([0.15, 0.3, 0.45, 0.6, 0.75, 0.9]), ccolor='k',
                 nrow=5, ncol=5,velmin=None, velmax=None, nskip=1,
-                xticks=np.empty, yticks=np.empty, relativecoords=True, vsys=None, csize=9, scalebar=np.empty,
+                xticks=np.empty, yticks=np.empty, relativecoords=True, vsys=None, csize=9, scalebar=np.empty(0),
                 cstar=True, prop_star=np.array(['1','0.5','red']), locsym=0.2, logscale=False, tickcolor='k',axiscolor='k',
-                labelcolor='k',cbarlabel=None, txtcolor='k', bcolor='k', figsize=(11.69,8.27), unit='arcsec',
-                cbarticks=None):
+                labelcolor='k',cbarlabel=None, txtcolor='k', bcolor='k', figsize=(11.69,8.27),
+                cbarticks=None,coord_center=None):
     '''
     Make channel maps from single image.
 
@@ -561,35 +771,31 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=[1], color=False
         restfreq = header['RESTFRQ'] # Hz
     except:
         restfreq = header['RESTFREQ'] # Hz
-    refval_x = header['CRVAL1']*60.*60. # deg --> arcsec
-    refval_y = header['CRVAL2']*60.*60.
+    refval_x = header['CRVAL1']       # deg
+    refval_y = header['CRVAL2']
     refval_v = header['CRVAL3']
     refpix_x = int(header['CRPIX1'])
     refpix_y = int(header['CRPIX2'])
     refpix_v = int(header['CRPIX3'])
-    del_x    = header['CDELT1']*60.*60. # deg --> arcsec
-    del_y    = header['CDELT2']*60.*60.
+    del_x    = header['CDELT1'] # deg --> arcsec
+    del_y    = header['CDELT2']
     del_v    = header['CDELT3']
     nx       = header['NAXIS1']
     ny       = header['NAXIS2']
     nchan    = header['NAXIS3']
-    bmaj     = header['BMAJ']*60.*60.
-    bmin     = header['BMIN']*60.*60.
+    bmaj     = header['BMAJ']
+    bmin     = header['BMIN']
     bpa      = header['BPA']  # [deg]
     unit     = header['BUNIT']
+    phi_p    = header['LONPOLE']
     print 'x, y axes are ', xlabel, ' and ', ylabel
+    try:
+        projection = xlabel.replace('RA---','')
+    except:
+        'Cannot read information about projection from fits file.'
+        'Set projection SIN for radio interferometric data.'
+        projection = 'SIN'
 
-    if unit == 'arcsec':
-        pass
-    elif unit == 'arcmin':
-        pass
-    elif unit == 'deg' or unit == 'degree':
-        refval_x = refval_x/3600.
-        refval_y = refval_y/3600.
-        del_x    = del_x/3600.
-        del_y    = del_y/3600.
-        bmaj     = bmaj/3600.
-        bmin     = bmin/3600.
 
     # frequency --> velocity
     if vlabel == 'VRAD':
@@ -607,17 +813,207 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=[1], color=False
         #print refval_v
 
 
-    # setting axes in relative coordinate
-    if relativecoords:
-        refval_x, refval_y = [0,0]
-        xlabel = 'RA offset (arcsec; J2000)'
-        ylabel = 'Dec offset (arcsec; J2000)'
+    # pixel to coordinate
+    # 1. pixels --> (x,y)
+    # edges of the image
+    xmin = (1 - refpix_x)*del_x - 0.5*del_x
+    xmax = (nx - refpix_x)*del_x + 0.5*del_x
+    ymin = (1 - refpix_y)*del_y - 0.5*del_y
+    ymax = (ny - refpix_y)*del_y + 0.5*del_y
+    #print xmin, xmax, ymin, ymax
+
+
+    # 2. (x,y) --> (phi, theta): native coordinate
+    # correct projection effect
+    # For detail, look into Mark R. Calabretta and Eric W. Greisen (A&A, 2002)
+    if projection == 'SIN':
+        #print 'projection: SIN'
+        phi_min = np.arctan2(xmin,-ymin)*180./np.pi                               # at xmin, ymin
+        the_min = np.arccos(np.sqrt(xmin*xmin + ymin*ymin)*np.pi/180.)*180./np.pi # at xmin, ymin
+        phi_max = np.arctan2(xmax,-ymax)*180./np.pi                               # at xmax, ymax
+        the_max = np.arccos(np.sqrt(xmax*xmax + ymax*ymax)*np.pi/180.)*180./np.pi # at xmax, ymax
+        alpha_0 = refval_x
+        delta_0 = refval_y
+        alpha_p = alpha_0
+        delta_p = delta_0
+        the_0   = 90. # degree
+        phi_0   = 0.
+        print phi_min, phi_max, the_min, the_max
+    elif projection == 'SFL':
+        # (ra, dec) of reference position is (0,0) in (phi, theta) and (x,y)
+        # (0,0) is on a equatorial line, and (0, 90) is the pole in a native spherical coordinate
+        #print 'projection: SFL'
+        cos = np.cos(np.radians(ymin))
+        phi_min = xmin/cos
+        the_min = ymin
+        cos = np.cos(np.radians(ymax))
+        phi_max = xmax/cos
+        the_max = ymax
+        alpha_0 = refval_x
+        delta_0 = refval_y
+        the_0   = 0.
+        phi_0   = 0.
+        alpha_p = None
+        delta_p = None
     else:
+        print 'ERROR: Input value of projection is wrong. Can be only SIN or SFL now.'
         pass
-    xmin = refval_x + (1 - refpix_x)*del_x - 0.5*del_x
-    xmax = refval_x + (nx - refpix_x)*del_x + 0.5*del_x
-    ymin = refval_y + (1 - refpix_y)*del_y - 0.5*del_y
-    ymax = refval_y + (ny - refpix_y)*del_y + 0.5*del_y
+
+
+    # 3. (phi, theta) --> (ra, dec) (sky plane)
+    # Again, for detail, look into Mark R. Calabretta and Eric W. Greisen (A&A, 2002)
+    if relativecoords and (coord_center is None):
+        # no transform from native coordinate to cerestial coordinate
+        #extent = (phi_min*60*60, phi_max*60*60, the_min*60*60, the_max*60*60)
+        extent = (xmin*60*60, xmax*60*60, ymin*60*60, ymax*60*60)
+        bmaj = bmaj*60.*60.
+        bmin = bmin*60.*60.
+        pos_cstar = (0,0)
+        xlabel = 'RA offset (arcsec)'
+        ylabel = 'DEC offset (arcsec)'
+        #print extent
+    else:
+        #print 'Now only relative coordinate is available.'
+        # (alpha_p, delta_p): cerestial coordinate of the native coordinate pole
+        # In SFL projection, reference point is not polar point
+
+        # parameters
+        sin_th0 = np.sin(np.radians(the_0))
+        cos_th0 = np.cos(np.radians(the_0))
+        sin_del0 = np.sin(np.radians(delta_0))
+        cos_del0 = np.cos(np.radians(delta_0))
+
+        # delta_p
+        if delta_p:
+            pass
+        else:
+            argy    = sin_th0
+            argx    = cos_th0*np.cos(np.radians(phi_p-phi_0))
+            arg     = np.arctan2(argy,argx)
+            #print arg
+
+            cos_inv  = np.arccos(sin_del0/(np.sqrt(1. - cos_th0*cos_th0*np.sin(phi_p - phi_0)*np.sin(phi_p - phi_0))))
+
+            delta_p = (arg + cos_inv)*180./np.pi
+
+            if (-90. > delta_p) or (delta_p > 90.):
+                delta_p = (arg - cos_inv)*180./np.pi
+
+            if (-90. > delta_p) or (delta_p > 90.):
+                print 'No valid delta_p. Use value in LATPOLE.'
+                delta_p = header['LATPOLE']
+
+        sin_delp = np.sin(np.radians(delta_p))
+        cos_delp = np.cos(np.radians(delta_p))
+
+        # alpha_p
+        if alpha_p:
+            pass
+        else:
+            sin_alpha_p = np.sin(np.radians(phi_p - phi_0))*cos_th0/cos_del0
+            cos_alpha_p = sin_th0 - sin_delp*sin_del0/(cos_delp*cos_del0)
+            #print sin_alpha_p, cos_alpha_p
+            #print np.arctan2(sin_alpha_p,cos_alpha_p)*180./np.pi
+            alpha_p = alpha_0 - np.arctan2(sin_alpha_p,cos_alpha_p)*180./np.pi
+            #print alpha_p
+
+
+        # ra, dec of map edges
+        # ra min, ra value at (1,1) in pixel
+        sin_th = np.sin(np.radians(the_min))
+        cos_th = np.cos(np.radians(the_min))
+
+        argy = -cos_th*np.sin(np.radians(phi_min-phi_p))
+        argx = sin_th*cos_delp - cos_th*sin_delp*np.cos(np.radians(phi_min-phi_p))
+        alpha_min = alpha_p + np.arctan2(argy,argx)*180./np.pi
+
+        if (alpha_min < 0.):
+            alpha_min = alpha_min + 360.
+        elif (alpha_min > 360.):
+            alpha_min = alpha_min - 360.
+
+        # ra max, ra value at (nx,ny) in pixel
+        sin_th = np.sin(np.radians(the_max))
+        cos_th = np.cos(np.radians(the_max))
+        argy = -cos_th*np.sin(np.radians(phi_max-phi_p))
+        argx = sin_th*cos_delp - cos_th*sin_delp*np.cos(np.radians(phi_max-phi_p))
+        alpha_max = alpha_p + np.arctan2(argy,argx)*180./np.pi
+
+        if (alpha_max < 0.):
+            alpha_max = alpha_max + 360.
+        elif (alpha_max > 360.):
+            alpha_max = alpha_max - 360.
+
+        #print alpha_min, alpha_max
+
+        # dec min, dec value at (1,1) in pixel
+        sin_th = np.sin(np.radians(the_min))
+        cos_th = np.cos(np.radians(the_min))
+        in_sin = sin_th*sin_delp+cos_th*cos_delp*np.cos(np.radians(phi_min-phi_p))
+        del_min = np.arcsin(in_sin)*180./np.pi
+
+        # dec max, dec value at (nx,ny) in pixel
+        sin_th = np.sin(np.radians(the_max))
+        cos_th = np.cos(np.radians(the_max))
+        in_sin = sin_th*sin_delp+cos_th*cos_delp*np.cos(np.radians(phi_max-phi_p))
+        del_max = np.arcsin(in_sin)*180./np.pi
+
+        #print del_min, del_max
+
+        extent = (alpha_min,alpha_max,del_min,del_max)
+
+        pos_cstar = (refval_x,refval_y)
+        #print extent
+        #return
+
+
+
+    # set coordinate center
+    if coord_center:
+        # ra, dec
+        refra, refdec = coord_center.split(' ')
+        ref           = SkyCoord(refra, refdec, frame='icrs')
+        refra_deg     = ref.ra.degree   # in degree
+        refdec_deg    = ref.dec.degree  # in degree
+        if relativecoords:
+            sin_delref = np.sin(np.radians(refdec_deg))
+            cos_delref = np.cos(np.radians(refdec_deg))
+            argx = sin_delref*cos_delp - cos_delref*sin_delp*np.cos(np.radians(refra_deg-alpha_p))
+            argy = -cos_delref*np.sin(np.radians(refra_deg-alpha_p))
+            arg  = np.arctan2(argy,argx)
+
+            phi_ref  = phi_p + arg*180./np.pi
+
+            in_sin = sin_delref*sin_delp + cos_delref*cos_delp*np.cos(np.radians(refra_deg-alpha_p))
+
+            the_ref = np.arcsin(in_sin)*180./np.pi
+
+            # (phi, theta) --> (x,y)
+            if projection == 'SIN':
+                rxy = np.cos(np.radians(the_ref))*180./np.pi
+                x_ref = rxy*np.sin(np.radians(phi_ref))
+                y_ref = -rxy*np.cos(np.radians(phi_ref))
+            elif projection == 'SFL':
+                x_ref = phi_ref*np.cos(np.radians(the_ref))
+                y_ref = the_ref
+
+            refval_x, refval_y = [-x_ref*60.*60., -y_ref*60.*60.]
+            #print refval_x, refval_y
+
+            extent = (xmin*60*60+refval_x, xmax*60*60+refval_x, ymin*60*60+refval_y, ymax*60*60+refval_y)
+            #print extent
+
+            bmaj = bmaj*60.*60.
+            bmin = bmin*60.*60.
+            pos_cstar = (0,0)
+
+            xlabel = 'RA offset (arcsec)'
+            ylabel = 'DEC offset (arcsec)'
+            #print refval_x, refval_y
+        else:
+            # no meaning but...
+            refval_x, refval_y = [refra_deg,refdec_deg]
+            pos_cstar = (refval_x,refval_y)
 
     # setting velocity axis in relative velocity
     if vsys:
@@ -669,9 +1065,9 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=[1], color=False
 
     # setting parameters used to plot
     if len(imscale) == 1:
-        figxmin, figxmax, figymin, figymax = [xmax,xmin,ymin,ymax]
+        figxmin, figxmax, figymin, figymax = extent
     elif len(imscale) == 4:
-        figxmin, figxmax, figymin, figymax = imscale
+        figxmax, figxmin, figymin, figymax = imscale
     else:
         print 'ERROR\tchannelmap: Input imscale is wrong. Must be [xmin, xmax, ymin, ymax]'
     i, j, gridi = [0,0,0]
@@ -707,13 +1103,13 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=[1], color=False
 
         # showing in color scale
         if color:
-            imcolor = ax.imshow(dataim, cmap=cmap, origin='lower', extent=(xmin,xmax,ymin,ymax),norm=norm)
+            imcolor = ax.imshow(dataim, cmap=cmap, origin='lower', extent=extent,norm=norm)
 
         if contour:
-            imcont  = ax.contour(dataim, colors=ccolor, origin='lower',extent=(xmin,xmax,ymin,ymax), levels=clevels, linewidths=0.5)
+            imcont  = ax.contour(dataim, colors=ccolor, origin='lower',extent=extent, levels=clevels, linewidths=0.5)
 
         # set axes
-        ax.set_xlim(figxmax,figxmin)
+        ax.set_xlim(figxmin,figxmax)
         ax.set_ylim(figymin,figymax)
         ax.spines["bottom"].set_color(axiscolor)
         ax.spines["top"].set_color(axiscolor)
@@ -749,11 +1145,10 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=[1], color=False
             ax.add_patch(beam)
 
             # scale bar
-            if scalebar is np.empty:
+            if len(scalebar) == 0:
                 pass
-            else:
-                barx, bary, barlength = scalebar[0,1,2]
-                textx, texty, text    = scalebar[3,4,5]
+            elif len(scalebar) == 8:
+                barx, bary, barlength, textx, texty, text, colors, barcsize = scalebar
 
                 barx      = float(barx)
                 bary      = float(bary)
@@ -761,9 +1156,11 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=[1], color=False
                 textx     = float(textx)
                 texty     = float(texty)
 
-                scale   = patches.Arc(xy=(barx,bary), width=barlength, height=0., lw=2, color='k',zorder=10)
+                scale   = patches.Arc(xy=(barx,bary), width=barlength, height=0.001, lw=2, color=colors,zorder=10)
                 ax.add_patch(scale)
-                ax.text(textx,texty,text)
+                ax.text(textx,texty,text,color=colors,fontsize=barcsize,horizontalalignment='center',verticalalignment='center')
+            else:
+                print 'scalebar must consist of 8 elements. Check scalebar.'
         else:
             ax.tick_params(labelbottom=False, labelleft=False, labelright=False, labeltop=False)
 
@@ -773,8 +1170,8 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=[1], color=False
             ll = float(ll)
             lw = float(lw)
 
-            cross01 = patches.Arc(xy=(refval_x,refval_y), width=ll, height=0.001, lw=lw, color=cl, zorder=11)
-            cross02 = patches.Arc(xy=(refval_x,refval_y), width=0.001, height=ll, lw=lw, color=cl, zorder=12)
+            cross01 = patches.Arc(xy=(0,0), width=ll, height=0.001, lw=lw, color=cl, zorder=11)
+            cross02 = patches.Arc(xy=(0,0), width=0.001, height=ll, lw=lw, color=cl, zorder=12)
             ax.add_patch(cross01)
             ax.add_patch(cross02)
 
@@ -857,12 +1254,12 @@ def channelmap(fitsdata, outname=None, outformat='eps', imscale=[1], color=False
 
 
 ### channel map
-def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, cmap='Greys', vmin=None, vmax=None,
+def mltichannelmap(fits01, fits02, outname=None, outformat='pdf', imscale=None, cmap='Greys', vmin=None, vmax=None,
                 imoption='clcn', clevels=np.array([0.15, 0.3, 0.45, 0.6, 0.75, 0.9]), ccolor='k',
                 nrow=5, ncol=5,velmin=None, velmax=None, nskip=1,colorbar=True,
                 xticks=np.empty(0), yticks=np.empty(0), relativecoords=True, vsys=None, csize=9, scalebar=np.empty,
                 cstar=True, locsym=0.2, logscale=False, tickcolor='k',axiscolor='k',labelcolor='k',cbarlabel=None, txtcolor='k',
-                bcolor='k', figsize=(11.69,8.27), ccolor2='red', lw2=0.5,alpha2=1):
+                bcolor='k', figsize=(11.69,8.27), ccolor2='red', lw2=0.5,alpha2=1, prop_star=np.array(['1','0.5','red'])):
     '''
     Make channel maps from images.
 
@@ -909,6 +1306,7 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
     # reading hd01 info.
     xlabel   = hd01['CTYPE1']
     ylabel   = hd01['CTYPE2']
+    vlabel   = hd01['CTYPE3']
     try:
         restfreq = hd01['RESTFRQ'] # Hz
     except:
@@ -931,14 +1329,21 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
     unit     = hd01['BUNIT']
     print 'x, y axes are ', xlabel, ' and ', ylabel
 
+
     # frequency --> velocity
-    print 'The third axis is [FREQUENCY]'
-    print 'Convert frequency to velocity'
-    del_v    = - del_v*clight/restfreq       # delf --> delv [cm/s]
-    del_v    = del_v*1.e-5                   # cm/s --> km/s
-    refval_v = clight*(1.-refval_v/restfreq) # radio velocity c*(1-f/f0) [cm/s]
-    refval_v = refval_v*1.e-5                # cm/s --> km/s
-    #print del_v
+    if vlabel == 'VRAD':
+        print 'The third axis is ', vlabel
+        del_v = del_v*1.e-3
+        refval_v = refval_v*1.e-3
+    else:
+        print 'The third axis is [FREQUENCY]'
+        print 'Convert frequency to velocity'
+        del_v    = - del_v*clight/restfreq       # delf --> delv [cm/s]
+        del_v    = del_v*1.e-5                   # cm/s --> km/s
+        refval_v = clight*(1.-refval_v/restfreq) # radio velocity c*(1-f/f0) [cm/s]
+        refval_v = refval_v*1.e-5                # cm/s --> km/s
+        #print refval_v
+
 
     # setting axes in relative coordinate
     if relativecoords:
@@ -963,6 +1368,7 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
     # reading hd02 info.
     xlabel02   = hd02['CTYPE1']
     ylabel02   = hd02['CTYPE2']
+    vlabel02   = hd02['CTYPE3']
     try:
         restfreq02 = hd02['RESTFRQ'] # Hz
     except:
@@ -985,14 +1391,21 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
     unit02     = hd02['BUNIT']
     print 'x, y axes are ', xlabel02, ' and ', ylabel02
 
+
     # frequency --> velocity
-    print 'The third axis is [FREQUENCY]'
-    print 'Convert frequency to velocity'
-    del_v02    = - del_v02*clight/restfreq02       # delf --> delv [cm/s]
-    del_v02    = del_v02*1.e-5                   # cm/s --> km/s
-    refval_v02 = clight*(1.-refval_v02/restfreq02) # radio velocity c*(1-f/f0) [cm/s]
-    refval_v02 = refval_v02*1.e-5                # cm/s --> km/s
-    #print del_v
+    if vlabel02 == 'VRAD':
+        print 'The third axis is ', vlabel
+        del_v02 = del_v02*1.e-3
+        refval_v02 = refval_v02*1.e-3
+    else:
+        print 'The third axis is [FREQUENCY]'
+        print 'Convert frequency to velocity'
+        del_v02    = - del_v02*clight/restfreq02       # delf --> delv [cm/s]
+        del_v02    = del_v02*1.e-5                     # cm/s --> km/s
+        refval_v02 = clight*(1.-refval_v02/restfreq02) # radio velocity c*(1-f/f0) [cm/s]
+        refval_v02 = refval_v02*1.e-5                  # cm/s --> km/s
+        #print refval_v
+
 
     # setting axes in relative coordinate
     if relativecoords:
@@ -1011,6 +1424,18 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
     # check data axes
     if len(data01.shape) == 4:
         pass
+    elif len(data01.shape) == 3:
+        data01 = data01.reshape((1,nchan,nx,ny))
+    else:
+        print 'Error\tsingleim_to_fig: Input fits size is not corrected.\
+         It is allowed only to have 4 axes. Check the shape of the fits file.'
+        return
+
+    # check data axes
+    if len(data02.shape) == 4:
+        pass
+    elif len(data02.shape) == 3:
+        data02 = data02.reshape((1,nchan02,nx02,ny02))
     else:
         print 'Error\tsingleim_to_fig: Input fits size is not corrected.\
          It is allowed only to have 4 axes. Check the shape of the fits file.'
@@ -1163,8 +1588,12 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
 
         # central star position
         if cstar:
-            cross01 = patches.Arc(xy=(refval_x,refval_y), width=1, height=0.001, lw=0.5, color='red',zorder=11)
-            cross02 = patches.Arc(xy=(refval_x,refval_y), width=0.001, height=1, lw=0.5, color='red',zorder=12)
+            ll,lw, cl = prop_star
+            ll = float(ll)
+            lw = float(lw)
+
+            cross01 = patches.Arc(xy=(refval_x,refval_y), width=ll, height=0.001, lw=lw, color=cl, zorder=11)
+            cross02 = patches.Arc(xy=(refval_x,refval_y), width=0.001, height=ll, lw=lw, color=cl, zorder=12)
             ax.add_patch(cross01)
             ax.add_patch(cross02)
 
@@ -1234,10 +1663,10 @@ def mltichannelmap(fits01, fits02, outname=None, outformat='eps', imscale=None, 
 
 
 ### PV diagram
-def pvdiagram(fitsdata,outname,outformat='eps',color=True,cmap='Greys',
+def pvdiagram(fitsdata,outname,outformat='pdf',color=True,cmap='Greys',
     vmin=None,vmax=None,vsys=None,contour=True,clevels=None,ccolor='k',
     vrel=False,logscale=False,x_offset=False,ratio=1.2, prop_vkep=None,fontsize=11,
-    lw=1):
+    lw=1,clip=None):
 
     # setting for figures
     plt.rcParams['font.size'] = fontsize           # fontsize
@@ -1341,9 +1770,15 @@ def pvdiagram(fitsdata,outname,outformat='eps',color=True,cmap='Greys',
         norm = mpl.colors.Normalize(vmin=vmin,vmax=vmax)
 
 
+    # clip data at some value
+    data_color = copy.copy(data)
+    if clip:
+        data_color[np.where(data < clip)] = np.nan
+
+
     # plot images
     if color:
-        imcolor = ax.imshow(data, cmap=cmap, origin='lower', extent=extent,norm=norm)
+        imcolor = ax.imshow(data_color, cmap=cmap, origin='lower', extent=extent,norm=norm)
 
     if contour:
         imcont  = ax.contour(data, colors=ccolor, origin='lower',extent=extent, levels=clevels, linewidths=lw)
